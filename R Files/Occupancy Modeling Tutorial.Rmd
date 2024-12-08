@@ -1,0 +1,447 @@
+---
+title: "Occupancy Modeling"
+author: "Amanda Zellmer"
+date: "2024-09-13"
+output: word_document
+params:
+  path: NULL  # Filepath, to directory with access to occupancy files and where output will go
+  sp_name: NULL  # Species name
+  range: NULL  # Using all data or just middle weeks (or middle days): "All" or "Middle"
+  by: NULL  # Calculate by day or by week: "Day" or "Week"
+---
+
+## Install and open autoOcc package
+
+```{r}
+# install.packages("devtools")
+# devtools::install_github(
+#   "mfidino/autoOcc",
+#   build_vignettes = TRUE
+# )
+
+library(autoOcc)
+#browseVignettes("autoOcc")
+```
+
+## Open other required packages
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(sf)
+library(terra)
+```
+
+## Open the dataset
+
+```{r}
+
+# Apply input species name
+species <- params$sp_name
+# Apply input folder pathway
+filepath <- params$path
+# Apply input data range (all or middle)
+data_range <- params$range
+# Apply input data type (day or week)
+type <- params$by
+
+# Specifies output filepath, "...Output/<Middle or All> Weeks/By <Day or Week>/Results - <species>/"
+# Change format as intended
+output_path <- paste0(filepath, "Output/", data_range, " Weeks/By ", type, "/Results - ", species, "/")
+
+# Read in current file
+glaa <- read.csv(paste0(filepath, "Species Occupancy/OccupancyReport - ", species, " - Seasonal.csv"))
+```
+
+
+
+## Summarize the occupancy data by week
+- This is particularly important if your species has low detection rates
+```{r}
+#### CHANGES
+non_na_count <- colSums(!is.na(glaa) & grepl("^Day_", names(glaa)))
+
+#glaa <- glaa %>%
+#  select(-matches("^Day_(1[0-4]|[1-9])$"), # To drop columns from Day_1 to Day_14
+#         -matches("^Day_(5[0-9]|6[0-9]|60)$")) # To drop columns from Day_48 to Day_60
+
+
+## Convert Day data into Week Data
+## Convert Day data into Week Data
+glaa <- glaa %>%
+  rowwise() %>%
+  mutate(
+    Week_1 = ifelse(all(is.na(c_across(matches("^Day_[1-7]$")))), NA,
+                    ifelse(sum(c_across(matches("^Day_[1-7]$")), na.rm = TRUE) > 0, 1, 0)),
+    Week_2 = ifelse(all(is.na(c_across(matches("^Day_(8|9|1[0-4])$")))), NA,
+                    ifelse(sum(c_across(matches("^Day_(8|9|1[0-4])$")), na.rm = TRUE) > 0, 1, 0)),
+    Week_3 = ifelse(all(is.na(c_across(matches("^Day_(1[5-9]|2[0-1])$")))), NA,
+                    ifelse(sum(c_across(matches("^Day_(1[5-9]|2[0-1])$")), na.rm = TRUE) > 0, 1, 0)),
+    Week_4 = ifelse(all(is.na(c_across(matches("^Day_(2[2-8])$")))), NA,
+                    ifelse(sum(c_across(matches("^Day_(2[2-8])$")), na.rm = TRUE) > 0, 1, 0)),
+    Week_5 = ifelse(all(is.na(c_across(matches("^Day_(2[9-9]|3[0-5])$")))), NA,
+                    ifelse(sum(c_across(matches("^Day_(2[9-9]|3[0-5])$")), na.rm = TRUE) > 0, 1, 0)),
+    Week_6 = ifelse(all(is.na(c_across(matches("^Day_(3[6-9]|4[0-2])$")))), NA,
+                    ifelse(sum(c_across(matches("^Day_(3[6-9]|4[0-2])$")), na.rm = TRUE) > 0, 1, 0)),
+    Week_7 = ifelse(all(is.na(c_across(matches("^Day_(4[3-9])$")))), NA,
+                    ifelse(sum(c_across(matches("^Day_(4[3-9])$")), na.rm = TRUE) > 0, 1, 0)),
+    Week_8 = ifelse(all(is.na(c_across(matches("^Day_(5[0-6])$")))), NA,
+                    ifelse(sum(c_across(matches("^Day_(5[0-6])$")), na.rm = TRUE) > 0, 1, 0))
+  ) %>%
+  ungroup()
+
+# Remove outside days and weeks if only considering middle
+if (data_range == "Middle") {
+  skip_days <- c(paste0("Day_", 1:14), paste0("Day_", 43:60))
+  skip_weeks <- c("Week_1", "Week_2", "Week_7", "Week_8")
+  glaa <- glaa %>%
+    select(-all_of(skip_days), -all_of(skip_weeks))
+}
+
+```
+
+## Add Season Data
+```{r}
+glaaSeasons <- read.csv(paste0(filepath, "Species Occupancy/header.csv"))
+glaaSeasons <- subset(glaaSeasons, Season.Legend. < 23)
+glaaSeasons <- glaaSeasons[,1:3]
+glaaSeasons$Month <- c(rep(c("OC", "JA", "AP", "JU"), times=5), "OC", "JA")
+glaaSeasons$Year <- c("18", rep(c("19", "20", "21", "22", "23"), each = 4), "24")
+glaaSeasons$Season <- paste0(glaaSeasons$Month, glaaSeasons$Year)
+glaaSeasons$SeasonNumber <- 1:nrow(glaaSeasons)
+glaaSeasons$Precipitation <- c("below avg", rep("above avg", times=8), rep("below avg", times=8), rep("above avg", times=5))
+
+glaa <- merge(glaa, glaaSeasons, by = "SeasonNumber", all=T)
+```
+
+## Open Impervious Data
+```{r}
+ impervious <- rast(paste0(filepath, "impervious_crop.asc"))
+ impervious[impervious >100] <- NA
+ e <- ext(c(min(glaa$Longitude), max(glaa$Longitude), min(glaa$Latitude), max(glaa$Latitude)))
+ e <- e+0.1
+ impervious <- crop(impervious, e)
+ names(impervious) <- "Layer_1"
+ #plot(impervious)
+ #points(glaaSP)
+
+
+
+impervious_df <- as.data.frame(impervious, xy = TRUE)
+
+
+
+## Create buffer around points
+library(sf)
+points_sf <- st_as_sf(glaa[,c("Longitude", "Latitude")], coords = c("Longitude", "Latitude"))
+
+# Create a 400m buffer around each point
+# Conversion factor for latitude 34
+meters_to_degrees <- 1 / 110567
+
+# Convert 400 meters to decimal degrees at latitude 34
+distance_in_degrees <- 200 * meters_to_degrees
+buffer_distance <- distance_in_degrees  # in meters
+#initially tried 0.01 but that is 1106m
+points_buffer <- st_buffer(points_sf, dist = buffer_distance)
+
+extract.data <- terra::extract(impervious[[1]], data.frame(glaa$Longitude, glaa$Latitude)) #impervious
+glaa$Impervious <- extract.data[,2]
+
+extract.data <- terra::extract(impervious[[1]], points_buffer) #impervious
+extract.data <- extract.data %>%
+  group_by(ID) %>%
+  summarise(Impervious = mean(as.numeric(Layer_1), na.rm = TRUE))
+extract.data2 <- as.data.frame(extract.data)
+glaa$Impervious <- extract.data2[,2]
+
+# Check if directory exists for results of current species; if not, create one
+if(dir.exists(output_path)==F){dir.create(output_path)}
+write.csv(glaa, paste0(output_path, species, "_final.csv"), row.names=F, quote=F)
+
+
+dev.new()
+jpeg("impervious.jpg")
+plot(impervious)
+points(glaa$Longitude, glaa$Latitude)
+dev.off()
+```
+
+```{r}
+
+# Order the seasons by date
+seasonOrder <- c("OC18",
+                "JA19", "AP19", "JU19", "OC19",
+                "JA20", "AP20", "JU20", "OC20",
+                "JA21", "AP21", "JU21", "OC21",
+                 "JA22", "AP22", "JU22", "OC22",
+                "JA23", "AP23", "JU23", "OC23",
+                "JA24")
+
+## Convert Season into a Factor
+glaa$Season <- factor(glaa$Season, levels=seasonOrder)
+
+## Arrange the data by Season and then Site
+glaa <- arrange(glaa, Season, Site)
+
+## Classify the Seasons by Dry vs Wet Years
+seasonsDro <- c("OC18", 
+                 "JA21", "AP21", "JU21", "OC21",
+                 "JA22", "AP22", "JU22", "OC22")
+ 
+seasonsWet <- c("JA19", "AP19", "JU19", "OC19",
+                 "JA20", "AP20", "JU20", "OC20",
+                 "JA23", "AP23", "JU23", "OC23",
+                 "JA24") 
+ 
+glaa$Precipitation <- "below avg"
+glaa$Precipitation[glaa$Season %in% seasonsWet] <- "above avg"
+
+## Create a list of unique species
+speciesList <- unique(glaa$Species)
+
+glaa.original <- glaa
+
+####
+# Summarize rows across columns and add a summary column
+glaa2 <- glaa %>%
+  # Drop rows with all NA
+  filter(!rowSums(is.na(select(., starts_with("Week_")))) == ncol(select(., starts_with("Week_")))) %>%
+  # Create a new column named 'Summary' with 1 if any Week_ column contains 1, else 0
+  mutate(Summary = ifelse(rowSums(select(., starts_with("Week_")) == 1, na.rm = TRUE) > 0, 1, 0))
+
+ggplot()+
+  geom_jitter(data=glaa2, aes(x=Impervious, y=Summary), height=0.05, width=0)+
+  facet_wrap(.~Treatment)
+
+# Summarize rows across columns and add a summary column
+glaa3 <- glaa.original %>%
+  # Drop rows with all NA
+  filter(!rowSums(is.na(select(., starts_with("Day_")))) == ncol(select(., starts_with("Day_")))) %>%
+  # Create a new column named 'Summary' with 1 if any Day_ column contains 1, else 0
+  mutate(Summary = ifelse(rowSums(select(., starts_with("Day_")) == 1, na.rm = TRUE) > 0, 1, 0))
+
+ggplot()+
+  geom_jitter(data=glaa3, aes(x=Impervious, y=Summary), height=0.05, width=0)+
+  facet_wrap(.~Precipitation)
+
+ggplot()+
+  geom_jitter(data=glaa3, aes(x=Impervious, y=Summary), height=0.05, width=0)+
+  facet_wrap(.~Treatment) +
+  theme_bw()+
+  xlab("Impervious Cover")+
+  ylab(paste0(species, " Occupancy"))
+
+```
+
+
+####
+```{r}
+day_sums <- glaa.original %>%
+  # Select columns that start with "Day_"
+  select(starts_with("Day_")) %>%
+  # Calculate the sum for each column
+  summarise(across(everything(), ~ sum(., na.rm = TRUE)))
+
+
+```
+
+## Run the Occupancy Model
+
+
+```{r}
+
+spp <- species
+species_det_hist <- glaa %>%
+  dplyr::select(c(Species, Site, Season, Month, starts_with(paste0(type, "_"))))
+species_det_hist <- as.data.frame(species_det_hist)
+species_covariates <- unique(glaa[,c("Site", "Impervious", "Treatment")])
+
+table(species_det_hist$Species)
+
+# function to generate detection history
+#  for the opossum data, opossum_y is
+#  a site by primary sampling period by secondary 
+#  sampling period array.
+species_y <- autoOcc::format_y(
+  x = species_det_hist,
+  site_column = "Site",
+  time_column = "Season",
+  history_columns = paste0("^", type)
+)
+# scale the covariates for analysis
+oc_scaled <- as.data.frame(
+  lapply(
+    species_covariates,
+    function(x){
+      if(is.numeric(x)){
+        scale(x)
+      }else{
+        x
+      }
+    }
+  )
+)
+# dropping site column from oc_scaled
+oc_scaled <- oc_scaled[,-1]
+#oc_scaled <- data.frame(Impervious = oc_scaled) #only need if only one variable in oc_scaled
+
+# season_frame <- list(
+#   Precipitation = matrix(
+#     species_det_hist$Precipitation,
+#     nrow = length(unique(species_det_hist$Site)),
+#     ncol = length(unique(species_det_hist$Season))
+#   ),
+#   Impervious = oc_scaled$Impervious
+# )
+# 
+# ##turn into a factor rather than character
+# unique_seasons <- as.vector(
+#   unique(
+#     species_det_hist$Precipitation
+#   )
+# )
+# 
+# season_frame$Precipitation <- as.data.frame(season_frame$Precipitation)
+# 
+# # make each column into a factor with the appropriate levels
+# season_frame$Precipitation <- as.data.frame(
+#   lapply(
+#     season_frame$Precipitation,
+#     function(x) factor(x, levels = unique_seasons)
+#   )
+# )
+# 
+
+
+# This temporal covariate is categorical and varies by primary sampling period,
+#  as such, the first column of this matrix is full of "JA19", the second is
+#  full of "AP19", etc. etc.
+# head(season_frame$Precipitation)
+
+m1 <- auto_occ(
+  ~1~1,
+  y = species_y,
+  det_covs = oc_scaled,
+  occ_covs = oc_scaled
+)
+
+m2 <- auto_occ(
+  ~Impervious~Impervious,
+  y = species_y,
+  det_covs = oc_scaled,
+  occ_covs = oc_scaled
+)
+m3 <- auto_occ(
+  ~Treatment~Treatment,
+  y = species_y,
+  det_covs = oc_scaled,
+  occ_covs = oc_scaled
+)
+
+m4 <- auto_occ(
+  ~Impervious + Treatment  ~ Impervious + Treatment,
+  y = species_y,
+  det_covs = oc_scaled,
+  occ_covs = oc_scaled
+)
+
+m5 <- auto_occ(
+  ~Impervious * Treatment  ~ Impervious * Treatment,
+  y = species_y,
+  det_covs = oc_scaled,
+  occ_covs = oc_scaled
+)
+
+# compare models
+my_aic_results <- compare_models(
+  list(m1, m2, m3, m4, m5),
+  digits = 2
+)
+
+write.csv(my_aic_results, paste0(output_path, spp, "_AIC.csv"), row.names=F, quote=F)
+
+cat(capture.output(summary(m1)), file=paste0(output_path, spp, ".txt"), sep="\n", append=FALSE)
+cat(capture.output(summary(m2)), file=paste0(output_path, spp, ".txt"), sep="\n", append=TRUE)
+cat(capture.output(summary(m3)), file=paste0(output_path, spp, ".txt"), sep="\n", append=TRUE)
+cat(capture.output(summary(m4)), file=paste0(output_path, spp, ".txt"), sep="\n", append=TRUE)
+cat(capture.output(summary(m5)), file=paste0(output_path, spp, ".txt"), sep="\n", append=TRUE)
+
+
+# first make the prediction data.frame with a realistic
+#   range based on the actual data and not the scaled data.
+#   The range(oc$Impervious) is about 0 to 81, so choose 0
+#   to 80. We do this so that we have nice numbers for plotting.
+#   Likewise, we scaled all of the other data, so we leave Income
+#   at it's mean (i.e., 0) for predictions.
+imperv_seq <- seq(0,ceiling(max(glaa2$Impervious)),1)
+season_levels <- unique(oc_scaled$Treatment)
+imperv_real <- data.frame(
+  Impervious = rep(
+    imperv_seq,
+    length(season_levels)
+  ),
+  Treatment = factor(
+    rep(season_levels,
+        each = length(imperv_seq)
+    ),
+    levels = season_levels
+  )
+)
+
+
+imperv_scaled <- imperv_real
+# Error here when species is "Mountain lion", or "Domestic Horse", or "Western Toad" (determinant is 0? It's a smaller set of data)
+imperv_scaled$Impervious <- (
+  imperv_scaled$Impervious - mean(species_covariates$Impervious)
+) / sd(species_covariates$Impervious)
+
+for(i in c("m1", "m2", "m3", "m4", "m5")){ # Broke on m2 for "Snake", "sigma must be a symmetric matrix"
+  print(i)
+  set.seed(13)
+  # the model prediction across a gradient of Impervious cover
+  opo_imperv <- predict(
+    object = get(i), #m3, #get(my_aic_results[1,1]),
+    type = "psi",
+    newdata = imperv_scaled
+  )
+  
+  # add on the covariate data
+  opo_imperv <- data.frame(
+    opo_imperv,
+    imperv_real
+  )
+  
+  
+  # plot it out
+  
+  ggplot()+
+    geom_line(data=opo_imperv, aes(x=Impervious, y=estimate, color=Treatment))+
+    geom_ribbon(data=opo_imperv, 
+                aes(x=Impervious, ymin=lower,ymax=upper, fill=Treatment), alpha=0.25)+
+    scale_color_manual(values=c("red", "dodgerblue"))+
+    scale_fill_manual(values=c("red", "dodgerblue"))+
+    geom_point(data=glaa2, aes(x=Impervious, y=Summary, shape=Treatment),
+                alpha=0.25)+
+    facet_grid(.~Treatment)+
+    theme_bw()+
+    ylab("Occupancy")+
+    xlab("Impervious Cover (%)")+
+    ggtitle(i)+
+    ylim(0,1)
+  
+  ggsave(paste0(output_path, i, ".jpg"), units="in", height=5, width=6, dpi=600)
+  rm(opo_imperv)
+}
+
+#my_aic_results <- my_aic_results
+#}
+
+#autoocc.out <- lapply(speciesList, autoocc.fun)
+
+
+
+
+```
+
