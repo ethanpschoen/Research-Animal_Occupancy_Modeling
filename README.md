@@ -24,5 +24,6 @@ The scripts in this repository are designed to process data from camera trap ima
 
 ### Output Files
 * Occupancy Grids: For each species, a CSV file called "Occupancy Report - <species_name> - Seasonal.csv". This file includes daily and weekly activity indicators (0, 1, NA) for each site and season.
-* Visualizaton: a bar graph comparing species activity counts across human and machine detections is saved as an image file.
+* Visualizaton: A bar graph comparing species activity counts across human and machine detections is saved as an image file.
 * Model Output: Statistical summaries and predictor importance scores for species occupancy are saved as text and CSV files. For each model of each species for analyzing by all weeks or middle weeks and by day or by week, an image file displays the best-fit curve determined by the model.
+* Model Analysis Across Methods: A CSV file compiling model results for all species for all weeks and middle weeks and by day and by week.
