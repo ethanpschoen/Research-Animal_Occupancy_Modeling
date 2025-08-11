@@ -4,7 +4,7 @@ library(lubridate)
 library(purrr)
 
 # Import file, change filepath/name as necessary
-df_activity <- read.csv("~/Desktop/School/Zellmer Lab/Junior/OccupancyReport - Active Dates.csv", skip = 2)
+df_activity <- read.csv("~/Desktop/School/Zellmer Lab/Junior/Input Data/OccupancyReport - Active Dates.csv", skip = 2)
 
 # Inactive if NA, Active if 0 or 1 
 df_activity <- df_activity %>%
@@ -32,19 +32,26 @@ df_activity_long <- df_activity %>%
 
 # Defines seasons
 season_dates <- data.frame(
-  Season = 1:24,
-  start_date = as.Date(c("2018-09-16", "2018-12-16", "2019-03-16", "2019-06-16",
-                         "2019-09-16", "2019-12-16", "2020-03-16", "2020-06-16",
-                         "2020-09-16", "2020-12-16", "2021-03-16", "2021-06-16",
-                         "2021-09-16", "2021-12-16", "2022-03-16", "2022-06-16",
-                         "2022-09-16", "2022-12-16", "2023-03-16", "2023-06-16",
-                         "2023-09-16", "2023-12-16", "2024-03-16", "2024-06-16")),
-  end_date = as.Date(c("2018-11-14", "2019-02-13", "2019-05-14", "2019-08-14",
-                       "2019-11-14", "2020-02-13", "2020-05-14", "2020-08-14",
-                       "2020-11-14", "2021-02-13", "2021-05-14", "2021-08-14",
-                       "2021-11-14", "2022-02-13", "2022-05-14", "2022-08-14",
-                       "2022-11-14", "2023-02-13", "2023-05-14", "2023-08-14",
-                       "2023-11-14", "2024-02-13", "2024-05-14", "2024-08-14"))
+  Season = 1:35,
+  start_date = as.Date(c("2015-12-18",
+                         "2016-03-18", "2016-06-17", "2016-09-17", "2016-12-18",
+                         "2017-03-18", "2017-06-17", "2017-09-17", "2017-12-18",
+                         "2018-03-18", "2018-06-17", "2018-09-17", "2018-12-18", 
+                         "2019-03-18", "2019-06-17", "2019-09-17", "2019-12-18", 
+                         "2020-03-18", "2020-06-17", "2020-09-17", "2020-12-18", 
+                         "2021-03-18", "2021-06-17", "2021-09-17", "2021-12-18", 
+                         "2022-03-18", "2022-06-17", "2022-09-17", "2022-12-18", 
+                         "2023-03-18", "2023-06-17", "2023-09-17", "2023-12-18", 
+                         "2024-03-18", "2024-06-17")),
+  end_date = as.Date(c("2016-02-14", "2016-05-14", "2016-08-14", "2016-11-14",
+                       "2017-02-14", "2017-05-14", "2017-08-14", "2017-11-14",
+                       "2018-02-14", "2018-05-14", "2018-08-14", "2018-11-14",
+                       "2019-02-13", "2019-05-14", "2019-08-14", "2019-11-14", 
+                       "2020-02-13", "2020-05-14", "2020-08-14", "2020-11-14", 
+                       "2021-02-13", "2021-05-14", "2021-08-14", "2021-11-14", 
+                       "2022-02-13", "2022-05-14", "2022-08-14", "2022-11-14", 
+                       "2023-02-13", "2023-05-14", "2023-08-14", "2023-11-14", 
+                       "2024-02-13", "2024-05-14", "2024-08-14"))
 )
 
 # Function for calculating season based on date
@@ -75,8 +82,27 @@ df_activity_long <- df_activity_long %>%
 
 # Make columns for Day_1, Day_2, etc.
 active_dates_wide <- df_activity_long %>%
-  pivot_wider(names_from = relative_day, values_from = Status, names_prefix = "Day_") %>%
-  select(Season, locAbbr, Latitude, Longitude, starts_with("Day_"))
+  pivot_wider(names_from = relative_day, values_from = Status, names_prefix = "Day_")
+
+active_dates_wide["City"] <- "PACA"
+
+site_info <- active_dates_wide %>%
+  select(City, locAbbr, Longitude, Latitude) %>%
+  distinct(City, locAbbr, .keep_all = TRUE)
+
+complete_rows <- expand_grid(
+  locAbbr = unique(active_dates_wide$locAbbr),
+  Season = season_dates$Season
+) %>%
+  left_join(site_info, by = "locAbbr") %>%
+  filter(City %in% active_dates_wide$City)
+
+df_complete <- complete_rows %>%
+  left_join(active_dates_wide, by = c("Season", "City", "locAbbr", "Latitude", "Longitude"))
+
+df_complete <- df_complete %>%
+  select(Season, City, locAbbr, Latitude, Longitude, starts_with("Day_")) %>%
+  mutate(across(starts_with("Day_"), ~ ifelse(is.na(.), FALSE, .)))
 
 # Output file
-write.csv(active_dates_wide, "~/Desktop/School/Zellmer Lab/Junior/active_dates.csv", row.names = FALSE)
+write.csv(df_complete, "~/Desktop/School/Zellmer Lab/Junior/Input Data/active_dates.csv", row.names = FALSE)

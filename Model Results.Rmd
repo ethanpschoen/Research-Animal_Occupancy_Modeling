@@ -1,0 +1,220 @@
+---
+title: "Untitled"
+author: "Amanda Zellmer"
+date: "2025-02-04"
+output: word_document
+params: 
+  path: NULL
+  location: NULL
+---
+
+```{r}
+
+# results <- read.csv("../Output/model_results.csv")
+# parameters <- read.csv("../Output/model_parameters.csv")
+
+```
+
+```{r}
+# library(ggplot2)
+# 
+# ggplot()+
+#   geom_bar(data=results, aes(x=model, y=AICwt, fill=Target), stat="identity")+
+#   facet_grid(Species~Range+By)+
+#   theme_bw()
+# 
+# ggsave("../Output/model_results.jpg", height=8, width=5, units="in", dpi=600)
+```
+
+
+
+```{r}
+
+library(dplyr)
+library(ggplot2)
+
+logit_to_prob <- function(logit) {
+  exp(logit) / (1 + exp(logit))
+}
+
+parameters <- read.csv("../Output/PACA/model_parameters.csv")
+
+species <- c("Virginia opossum", "Skunk", "Squirrel-Chipmunk", "Rodent",
+             "Raccoon", "Rabbit", "Deer", "Lizard", "Domestic cat", "Coyote",
+             "Bobcat", "Black bear", "Bird")
+
+parameters <- parameters %>%
+  filter(Threshold == 0.8, Species %in% species)
+
+parameters$Est_tr <- logit_to_prob(parameters$Est)
+
+library(dplyr)
+
+summary_df <- parameters %>%
+  group_by(Species, Model, parameter) %>%
+  summarize(Diff_Est = diff(Est[Treatment %in% c("human", "md")]),
+            Diff_Est_tr = diff(Est_tr[Treatment %in% c("human", "md")]),
+            Diff_SE = diff(SE[Treatment %in% c("human", "md")]),
+            .groups = "drop")
+
+ggplot()+
+  geom_point(data=subset(summary_df, Model == "m2"), aes(x = Diff_Est_tr, y=reorder(Species, Diff_Est_tr)))+
+  facet_grid(parameter~.)+
+  ylab("Species")+
+  theme_bw(base_size = 8)
+
+
+ggplot()+
+  geom_point(data=summary_df, aes(x = Diff_SE, y=reorder(Species, Diff_SE)))+
+  facet_grid(parameter~Model)+
+  ylab("Species")+
+  theme_bw(base_size = 8)
+
+ggplot()+
+  geom_point(data=subset(parameters, Model == "m2"), aes(x = Est, y=Species, color=Treatment), 
+             alpha=0.5, position = position_dodge(width = 0.5))+
+  geom_errorbar(data=subset(parameters, Model == "m2"), 
+                aes(x = Est, y=Species, color=Treatment, xmin = Est - SE, xmax = Est + SE), 
+                width = 0.2, alpha=0.5, position = position_dodge(width = 0.5)) + # SE bars
+  facet_grid(.~parameter, scales="free_x")+
+  xlab("Estimate")+
+  ylab("Species")+
+  theme_bw(base_size = 8)+
+  scale_color_manual(values = c("human" = "dodgerblue", "md" = "red"))
+
+ggsave("../Output/Parameters.jpg", height=5, width=8, units="in", dpi=600)
+# 
+# 
+# ggplot()+
+#   geom_point(data=subset(summary_df, Model == "m2"), aes(x = Diff_Est_tr, y=Species), alpha=0.5, position = position_dodge(width = 0.5))+
+#   facet_grid(.~parameter)+
+#   xlab("Change in Estimated Probability")+
+#   ylab("Species")+
+#   theme_bw(base_size = 8)
+# 
+# ggsave("../Output/Parameters_Diff.jpg", height=5, width=7, units="in", dpi=600)
+
+```
+
+```{r}
+
+# library(dplyr)
+# library(tidyr)
+# library(purrr)
+# library(ggplot2)
+# 
+# # Filter for Model "m2" and select relevant parameters
+# filtered_params <- parameters %>%
+#   filter(Model == "m2", parameter %in% c("psi - (Intercept)", "psi - Impervious", 
+#                                          "rho - (Intercept)", "rho - Impervious")) %>%
+#   select(Species, parameter, Est, Treatment)
+# 
+# # Pivot so we have separate columns for intercept and slope
+# param_wide <- filtered_params %>%
+#   pivot_wider(names_from = parameter, values_from = Est)
+# 
+# 
+# 
+# # Define urbanization levels (0 to 40% impervious)
+# urbanization_levels <- seq(0, 40, length.out = 100)
+# 
+# # Expand grid for predictions
+# predicted_values <- expand.grid(Species = unique(param_wide$Species), 
+#                                 Treatment = unique(param_wide$Treatment), 
+#                                 urbanization = urbanization_levels) %>%
+#   left_join(param_wide, by = c("Species", "Treatment")) %>%
+#   rowwise() %>%
+#   mutate(
+#     psi_est = plogis(`psi - (Intercept)`[[1]] + `psi - Impervious`[[1]] * urbanization),
+#     rho_est = plogis(`rho - (Intercept)`[[1]] + `rho - Impervious`[[1]] * urbanization)
+#   ) %>%
+#   ungroup() %>%
+#   pivot_longer(cols = c(psi_est, rho_est), names_to = "parameter", values_to = "Est_tr")
+# 
+# # Plot estimated occupancy and detection vs. impervious surface, faceted by Treatment
+# ggplot(predicted_values, aes(x = urbanization, y = Est_tr, color = Treatment)) +
+#   geom_line() +
+#   facet_grid(parameter ~ Species, scales = "free_y", 
+#             labeller = labeller(
+#                                  parameter = c(psi_est = "Occupancy (ψ)", rho_est = "Detection (ρ)"))) +
+#    labs(x = "Impervious Surface (%)", y = "Estimated Probability") +
+#   theme_bw(base_size=8)
+# 
+# ggsave("../Output/Impervious.jpg", height=5, width=12, units="in", dpi=600)
+
+```
+
+```{r}
+#parameters_t <- read.csv("../Output/all_parameters.csv")
+
+filepath <- params$path
+#filepath <- "../Output/URIL/"
+
+city <- params$location
+#city <- "URIL"
+
+parameters_t <- read.csv(paste0(filepath, "model_parameters.csv"))
+parameters_t$Est_tr <- logit_to_prob(parameters_t$Est)
+
+summary_df_t <- parameters_t %>%
+  group_by(Species, Model, parameter, Threshold) %>%
+  summarize(Diff_Est = diff(Est[Treatment %in% c("human", "md")]),
+            Diff_Est_tr = diff(Est_tr[Treatment %in% c("human", "md")]),
+            Diff_SE = diff(SE[Treatment %in% c("human", "md")]),
+            .groups = "drop")
+
+
+ggplot()+
+  geom_line(data=subset(summary_df_t,
+                         parameter == "psi - (Intercept)" & Model == "m1"),
+             aes(x = Threshold, y=Diff_Est_tr), alpha = 0.25)+
+  geom_point(data=subset(summary_df_t,
+                         parameter == "psi - (Intercept)" & Model == "m1"),
+             aes(x = Threshold, y=Diff_Est_tr))+
+  facet_wrap(Species~.)+
+  ylab(paste0("(", city, ") Difference in Estimated Occupancy"))+
+  theme_bw(base_size = 8)
+
+ggsave(paste0(filepath, "Threshold_Occupancy.jpg"), height=5, width=6, units="in", dpi=600)
+
+ggplot()+
+  geom_line(data=subset(summary_df_t,
+                         parameter == "rho - (Intercept)" & Model == "m1"),
+             aes(x = Threshold, y=Diff_Est_tr), alpha = 0.25)+
+  geom_point(data=subset(summary_df_t,
+                         parameter == "rho - (Intercept)" & Model == "m1"),
+             aes(x = Threshold, y=Diff_Est_tr))+
+  facet_wrap(Species~.)+
+  ylab(paste0("(", city, ") Difference in Estimated Detection"))+
+  theme_bw(base_size = 8)
+
+ggsave(paste0(filepath, "Threshold_Detection.jpg"), height=5, width=6, units="in", dpi=600)
+
+ggplot()+
+  geom_line(data=subset(summary_df_t,
+                         Model == "m2"),
+             aes(x = Threshold, y=Diff_Est_tr, color=Species), alpha = 0.25)+
+  geom_point(data=subset(summary_df_t,
+                         Model == "m2"),
+             aes(x = Threshold, y=Diff_Est_tr, color=Species), alpha = 0.25)+
+  facet_grid(parameter~., scales="free_y")+
+  ylab(paste0("(", city, ") Difference in Estimated Detection"))+
+  theme_bw(base_size = 8)
+
+ggsave(paste0(filepath, "Threshold_Parameters_Color.jpg"), height=5, width=4, units="in", dpi=600)
+
+ggplot()+
+  geom_line(data=subset(summary_df_t,
+                         Model == "m2"),
+             aes(x = Threshold, y=Diff_Est_tr), alpha = 0.25)+
+  geom_point(data=subset(summary_df_t,
+                         Model == "m2"),
+             aes(x = Threshold, y=Diff_Est_tr), alpha = 0.75)+
+  facet_grid(Species~parameter)+
+  ylab(paste0("(", city, ") Difference in Estimated Detection"))+
+  theme_bw(base_size = 8)
+
+ggsave(paste0(filepath, "Threshold_Parameters.jpg"), height=12, width=10, units="in", dpi=600)
+
+```
+

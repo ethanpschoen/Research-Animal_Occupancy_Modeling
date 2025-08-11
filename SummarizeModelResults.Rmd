@@ -1,0 +1,246 @@
+---
+title: "SummarizeModelResults"
+output: html_document
+date: "2025-06-01"
+---
+
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(purrr)
+
+```
+
+```{r}
+
+# Change as intended
+filepath <- "../Output/"
+
+# Used to generate list of species, cities
+old <- read.csv("../Input Data/multi_city_data_cleaned.csv")
+species_list <- read.csv("../Species Occupancy/species_list.csv")
+species_list <- unique(species_list$x)
+cities <- unique(old$City)
+
+# Don't consider these species (change as intended)
+exclude <- c("Empty", "Unknown", "Human")
+
+# List of target species
+# target <- c("Mountain lion", "Bobcat", "Striped Skunk", "Rodent", "Gray fox", 
+#             "Squirrel-Chipmunk", "Coyote", "Virginia opossum", "Rabbit", "Mule deer",
+#  
+
+```
+
+```{r}
+
+PACA_skip <- c("Snake", "Western Toad", "Horse", "Fox squirrel")
+AUTX_skip <- c("Insect", "Snake", "Duck", "Turtle", "Gray fox")
+BOMA_skip <- c()
+CHIL_skip <- c("Gray fox", "Snake", "Duck", "Red fox", "Flying squirrel", "North american beaver", 
+               "Weasel", "Woodchuck", "American mink", "Rodent")
+ICIA_skip <- c("Bobcat", "Insect", "Flying squirrel", "muskrat", "American mink", 
+               "American Badger")
+ININ_skip <- c("Skunk", "Rodent", "Gray squirrel", "Turtle", "Chipmunk", 
+               "North american beaver", "muskrat", "American Badger", "Red fox", 
+               "American mink", "Red squirrel")
+JAMS_skip <- c("Skunk", "Rodent", "Snake", "Squirrel-Chipmunk", "Fox squirrel")
+SLMO_skip <- c("Rodent", "Gray fox", "Insect", "Horse", "Duck", "Canada Goose", 
+               "Chipmunk")
+TAWA_skip <- c("Bobcat", "Squirrel-Chipmunk", "Fox squirrel", "Weasel", "Gray squirrel", "Mountain Beaver", 
+               "Chipmunk")
+URIL_skip <- c("Weasel")
+
+```
+
+```{r}
+
+# For each city
+for(city in cities) {
+  # Empty dataframe to put model data into
+  df <- data.frame(
+    Species = character(),
+    # Target = logical(),
+    City = character(),
+    Range = character(),
+    By = character(),
+    Threshold = numeric(),
+    Treatment = character(),
+    model = character(),
+    npar = numeric(),
+    AIC = numeric(),
+    delta = numeric(),
+    AICwt = numeric(),
+    cumltvWt = numeric()
+  )
+  
+  # Empty dataframe to put model parameter data into
+  parameter_df <- data.frame(
+    Species = character(),
+    # Target = logical(),
+    City = character(),
+    Range = character(),
+    By = character(),
+    Threshold = numeric(),
+    Treatment = character(),
+    Model = character(),
+    parameter = character(),
+    Est = numeric(),
+    SE = numeric(),
+    lower = numeric(),
+    upper = numeric(),
+    p = numeric()
+  )
+  
+  # For each confidence threshold
+  for(thresh in c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99)) {
+    # For both Day and Week
+    for (type in c("Day", "Week")) {
+      if (type == "Day") {
+        next
+      }
+      
+      # For both All and Middle weeks
+      for (range in c("All", "Middle")) {
+        if (range == "Middle") {
+          next
+        }
+  
+        # For each species...
+        for (species in species_list) {
+          # Not in exclude
+          if (species %in% exclude ||
+              (city == "PACA" && species %in% PACA_skip) ||
+              (city == "AUTX" && species %in% AUTX_skip) ||
+              (city == "BOMA" && species %in% BOMA_skip) ||
+              (city == "CHIL" && species %in% CHIL_skip) ||
+              (city == "ICIA" && species %in% ICIA_skip) ||
+              (city == "ININ" && species %in% ININ_skip) ||
+              (city == "JAMS" && species %in% JAMS_skip) ||
+              (city == "SLMO" && species %in% SLMO_skip) ||
+              (city == "TAWA" && species %in% TAWA_skip) ||
+              (city == "URIL" && species %in% URIL_skip)) {
+            next
+          }
+          
+          # Specify path to draw data from
+          cur_path <- paste0(filepath, city, "/", "Conf. ", thresh, "/Results - ", species, "/")
+          
+          # Skip if species wasn't modeled for that city, threshold
+          if (dir.exists(cur_path) == F) {
+            next
+          }
+          
+          # For human and md treated data
+          for (treatment in c("human", "md")) {
+            # Read in data
+            cur_file <- read.csv(paste0(cur_path, species, "_AIC_", treatment, ".csv"))
+            
+            # Input new data for dataframe
+            cur_file["Species"] <- species
+            # cur_file["Target"] <- species %in% target
+            cur_file["Range"] <- range
+            cur_file["By"] <- type
+            cur_file["City"] <- city
+            cur_file["Treatment"] <- treatment
+            cur_file["Threshold"] <- thresh
+            
+            # Add model data to general dataframe
+            df <- rbind(df, cur_file)
+            
+            # Read in parameter data
+            parameters <- read.csv(paste0(cur_path, species, "_Model_Estimates_", treatment, ".csv"))
+            
+            # Input new data for dataframe
+            # parameters["Target"] <- species %in% target
+            parameters["Range"] <- range
+            parameters["Threshold"] <- thresh
+            
+            # Add parameter data to general dataframe
+            parameter_df <- rbind(parameter_df, parameters)
+          }
+        }
+      }
+    }
+  }
+  
+  # Re-order columns
+  df <- df %>%
+    select(Species, 
+           # Target, 
+           City, Range, By, Threshold, Treatment, model, npar, AIC, delta, AICwt, cumltvWt)
+  
+  parameter_df <- parameter_df %>%
+    select(Species, 
+           # Target, 
+           City, Range, By, Threshold, Treatment, Model, parameter, Est, SE, lower, upper, p)
+  
+  output_path <- paste0(filepath, city, "/")
+  
+  if (dir.exists(output_path) == F) {
+    next
+  }
+  
+  # Write out, change filepath as intended
+  write.csv(df, paste0(output_path, "model_results.csv"), row.names = FALSE)
+  
+  write.csv(parameter_df, paste0(output_path, "model_parameters.csv"), row.names = FALSE)
+}
+
+```
+
+```{r}
+
+# Get all data across all cities
+all_city_parameters <- data.frame(
+  Species = character(),
+  # Target = logical(),
+  City = character(),
+  Range = character(),
+  By = character(),
+  Threshold = numeric(),
+  Treatment = character(),
+  Model = character(),
+  parameter = character(),
+  Est = numeric(),
+  SE = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  p = numeric()
+)
+
+for (city in cities) {
+  cur_path <- paste0(filepath, city, "/")
+  
+  if (dir.exists(cur_path) == F) {
+    next
+  }
+  
+  city_parameters <- read.csv(paste0(cur_path, "model_parameters.csv"))
+  
+  all_city_parameters <- rbind(all_city_parameters, city_parameters)
+}
+
+write.csv(all_city_parameters, paste0(filepath, "/all_parameters.csv"))
+
+```
+
+```{r}
+
+for (city in cities) {
+  cur_path <- paste0("../Output/", city, "/")
+  
+  if (dir.exists(cur_path) == F) {
+    next
+  }
+  
+  print(city)
+  
+  render("../R Files/Model Results.Rmd",
+         params = list(path = cur_path, location = city))
+}
+
+```
+

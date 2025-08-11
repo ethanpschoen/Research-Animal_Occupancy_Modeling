@@ -1,0 +1,102 @@
+```{r}
+
+library(dplyr)
+library(tidyr)
+
+old_activity <- read.csv("../Input Data/zellmer_observation_history.csv")
+
+new_activity <- old_activity %>%
+  rename("locAbbr" = "Site", "Longitude" = "Long", "Latitude" = "Lat") %>%
+  filter("City" != "mela")
+
+new_activity$City[new_activity$City == "autx"] <- "AUTX"
+new_activity$City[new_activity$City == "boma"] <- "BOMA"
+new_activity$City[new_activity$City == "chil"] <- "CHIL"
+new_activity$City[new_activity$City == "inin"] <- "ININ"
+new_activity$City[new_activity$City == "ioio"] <- "ICIA"
+new_activity$City[new_activity$City == "jams"] <- "JAMS"
+new_activity$City[new_activity$City == "slmo"] <- "SLMO"
+new_activity$City[new_activity$City == "tawa"] <- "TAWA"
+new_activity$City[new_activity$City == "uril"] <- "URIL"
+
+new_activity <- new_activity[new_activity$locAbbr != "LAC2", ]
+new_activity <- new_activity[new_activity$locAbbr != "SSP2", ]
+new_activity$Latitude = ifelse(
+  new_activity$locAbbr == "P-TE2",
+  new_activity$Latitude * 10,
+  new_activity$Latitude
+)
+
+```
+
+```{r}
+
+# Defines seasons
+season_dates <- data.frame(
+  Season = 1:35,
+  season_name = c("JA16", "AP16", "JU16", "OC16",
+                  "JA17", "AP17", "JU17", "OC17",
+                  "JA18", "AP18", "JU18", "OC18",
+                  "JA19", "AP19", "JU19", "OC19",
+                  "JA20", "AP20", "JU20", "OC20",
+                  "JA21", "AP21", "JU21", "OC21",
+                  "JA22", "AP22", "JU22", "OC22",
+                  "JA23", "AP23", "JU23", "OC23",
+                  "JA24", "AP24", "JU24"),
+  start_date = as.Date(c("2015-12-18",
+                         "2016-03-18", "2016-06-17", "2016-09-17", "2016-12-18",
+                         "2017-03-18", "2017-06-17", "2017-09-17", "2017-12-18",
+                         "2018-03-18", "2018-06-17", "2018-09-17", "2018-12-18", 
+                         "2019-03-18", "2019-06-17", "2019-09-17", "2019-12-18", 
+                         "2020-03-18", "2020-06-17", "2020-09-17", "2020-12-18", 
+                         "2021-03-18", "2021-06-17", "2021-09-17", "2021-12-18", 
+                         "2022-03-18", "2022-06-17", "2022-09-17", "2022-12-18", 
+                         "2023-03-18", "2023-06-17", "2023-09-17", "2023-12-18", 
+                         "2024-03-18", "2024-06-17")),
+  end_date = as.Date(c("2016-02-14", "2016-05-14", "2016-08-14", "2016-11-14",
+                       "2017-02-14", "2017-05-14", "2017-08-14", "2017-11-14",
+                       "2018-02-14", "2018-05-14", "2018-08-14", "2018-11-14",
+                       "2019-02-13", "2019-05-14", "2019-08-14", "2019-11-14", 
+                       "2020-02-13", "2020-05-14", "2020-08-14", "2020-11-14", 
+                       "2021-02-13", "2021-05-14", "2021-08-14", "2021-11-14", 
+                       "2022-02-13", "2022-05-14", "2022-08-14", "2022-11-14", 
+                       "2023-02-13", "2023-05-14", "2023-08-14", "2023-11-14", 
+                       "2024-02-13", "2024-05-14", "2024-08-14"))
+)
+
+for(name in season_dates$season_name) {
+  new_activity$Season[new_activity$Season == name] <- season_dates$Season[season_dates$season_name == name]
+}
+
+new_activity$Season <- as.integer(new_activity$Season)
+
+site_info <- new_activity %>%
+  select(City, locAbbr, Longitude, Latitude) %>%
+  distinct(City, locAbbr, .keep_all = TRUE)
+
+complete_rows <- expand_grid(
+  locAbbr = unique(new_activity$locAbbr),
+  Season = season_dates$Season
+) %>%
+  left_join(site_info, by = "locAbbr") %>%
+  filter(City %in% new_activity$City)
+
+```
+
+```{r}
+
+df_complete <- complete_rows %>%
+  left_join(new_activity, by = c("Season", "City", "locAbbr", "Latitude", "Longitude"))
+
+```
+
+```{r}
+
+df_complete <- df_complete %>%
+  mutate(across(starts_with("Day_"), ~ ifelse(is.na(.), FALSE, TRUE))) %>%
+  select(Season, City, locAbbr, Latitude, Longitude, starts_with("Day_"))
+
+write.csv(df_complete, "../Input Data/multi_city_active_dates.csv", row.names = FALSE)
+
+```
+

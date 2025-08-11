@@ -1,0 +1,612 @@
+---
+title: "ConvertToOccupancy"
+output: html_document
+date: "2025-05-31"
+---
+
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(purrr)
+library(rmarkdown)
+library(stringr)
+library(ggplot2)
+library(forcats)
+
+```
+
+```{r}
+
+# Specifying input and output paths
+input_path <- "../Input Data/"
+output_path <- "../Species Occupancy/"
+
+# Import file, change filepath/name as necessary
+df <- read.csv(paste0(input_path, "multi_city_data_cleaned.csv"))
+
+# Import file, change filepath/name as necessary
+active_dates <- read.csv(paste0(input_path, "all_city_active_dates.csv"))
+
+```
+
+```{r}
+
+# Format before was FALSE for inactive, TRUE for active. Converts FALSE to NA and TRUE to 0 (will update to 1 if present)
+active_dates <- active_dates %>%
+  mutate(across(starts_with("Day_"), ~ ifelse(. == FALSE, NA, 0))) %>%
+  arrange(Season)
+
+# If PACA, remove the first 4 characters to match the df locAbbr names
+active_dates <- active_dates %>%
+  mutate(locAbbr = ifelse(
+    City == "PACA",
+    substr(locAbbr, 5, nchar(locAbbr)),
+    locAbbr
+  ))
+
+# Dataframe with season information
+season_dates <- data.frame(
+  Season = 1:35,
+  start_date = as.Date(c("2015-12-18",
+                         "2016-03-18", "2016-06-17", "2016-09-17", "2016-12-18",
+                         "2017-03-18", "2017-06-17", "2017-09-17", "2017-12-18",
+                         "2018-03-18", "2018-06-17", "2018-09-17", "2018-12-18", 
+                         "2019-03-18", "2019-06-17", "2019-09-17", "2019-12-18", 
+                         "2020-03-18", "2020-06-17", "2020-09-17", "2020-12-18", 
+                         "2021-03-18", "2021-06-17", "2021-09-17", "2021-12-18", 
+                         "2022-03-18", "2022-06-17", "2022-09-17", "2022-12-18", 
+                         "2023-03-18", "2023-06-17", "2023-09-17", "2023-12-18", 
+                         "2024-03-18", "2024-06-17")),
+  end_date = as.Date(c("2016-02-14", "2016-05-14", "2016-08-14", "2016-11-14",
+                       "2017-02-14", "2017-05-14", "2017-08-14", "2017-11-14",
+                       "2018-02-14", "2018-05-14", "2018-08-14", "2018-11-14",
+                       "2019-02-13", "2019-05-14", "2019-08-14", "2019-11-14", 
+                       "2020-02-13", "2020-05-14", "2020-08-14", "2020-11-14", 
+                       "2021-02-13", "2021-05-14", "2021-08-14", "2021-11-14", 
+                       "2022-02-13", "2022-05-14", "2022-08-14", "2022-11-14", 
+                       "2023-02-13", "2023-05-14", "2023-08-14", "2023-11-14", 
+                       "2024-02-13", "2024-05-14", "2024-08-14"))
+)
+
+# Converts Timestamp to proper date, combines with season_dates to add relative_days column (what day of the season)
+df <- df %>%
+  mutate(Timestamp = ymd_hms(Timestamp)) %>%
+  left_join(season_dates, by = "Season") %>%
+  mutate(relative_days = as.integer(difftime(Timestamp, start_date, units = "days")) + 1) %>%
+  select(-start_date)
+
+```
+
+```{r}
+
+# Create header
+header_df <- season_dates %>%
+  rename("Season Legend:" = "Season", "Start Date" = "start_date", "End Date" = "end_date")
+
+# Adds empty line of header to make margin before data
+end_header_text <- data.frame(
+  Season = "",
+  Start = "",
+  End = ""
+)
+
+# Combines headers
+header <- bind_rows(header_df, end_header_text)
+
+# Outputs file
+write.csv(header, paste0(output_path, "header.csv"), row.names = FALSE)
+
+```
+
+```{r}
+
+# Maps "sub-species" names to group name
+species_map <- c(
+  "Fox squirrel_Fox squirrel" = "Fox squirrel",
+  "melanistic gray squirrel" = "Eastern gray squirrel",
+  "Eastern gray squirrel_Eastern gray squirrel" = "Eastern gray squirrel",
+  "Flying squirrel (cannot ID)" = "Flying squirrel",
+  "Southern Flying Squirrel" = "Flying squirrel",
+  "Eastern chipmunk" = "Chipmunk",
+  "Western Chipmunks" = "Chipmunk",
+  "Squirrel/Chipmunk" = "Squirrel-Chipmunk",
+  "Squirrel (cannot ID)" = "Squirrel-Chipmunk",
+  "chipmunk/grd squirrel" = "Squirrel-Chipmunk",
+  "Squirrel (cannot ID)_Squirrel (cannot ID)" = "Squirrel-Chipmunk",
+  "gray squirrel (cannot ID)" = "Squirrel-Chipmunk",
+  "skunk (cannot ID)" = "Skunk",
+  "Striped Skunk" = "Skunk",
+  "Human_Human" = "Human",
+  "Northern cardinal" = "Bird",
+  "wren" = "Bird",
+  "Bird - Blue jay" = "Bird",
+  "Common Grackle" = "Bird",
+  "White-winged dove" = "Bird",
+  "Great-tailed grackle" = "Bird",
+  "yellow crowned night heron" = "Bird",
+  "Doves" = "Bird",
+  "Great egret" = "Bird",
+  "Red-shouldered Hawk" = "Bird",
+  "Bird_Bird" = "Bird",
+  "American robin" = "Bird",
+  "Ring-necked Pheasant" = "Bird",
+  "Tamaulipas crow" = "Bird",
+  "Northern Mockingbird" = "Bird",
+  "Northern Flicker" = "Bird",
+  "Steller's Jay" = "Bird",
+  "Varied Thrush" = "Bird",
+  "Spotted Towhee" = "Bird",
+  "Dark-eyed Junco" = "Bird",
+  "Song Sparrow " = "Bird",
+  "Anna's Hummingbird" = "Bird",
+  "American Crow" = "Bird",
+  "Pacific Wren" = "Bird",
+  "Barred Owl" = "Bird",
+  "European Starling" = "Bird",
+  "White Crowned Sparrow" = "Bird",
+  "Grouse (cannot ID)" = "Bird",
+  "Black-Capped Chickadee" = "Bird",
+  "Songbird/Perching Bird" = "Bird",
+  "Mouse" = "Rodent",
+  "Brown Rat" = "Rodent",
+  "Deer mouse" = "Rodent",
+  "Rat spp." = "Rodent",
+  "Nutria" = "Rodent",
+  "Raccoon_Raccoon" = "Raccoon",
+  "Cottontail rabbit sp." = "Rabbit",
+  "Brush Rabbit" = "Rabbit",
+  "Black-tailed Jackrabbit" = "Rabbit",
+  "Eastern cottontail rabbit" = "Rabbit",
+  "Rabbit (cannot ID)" = "Rabbit",
+  "Jackrabbit (cannot ID)" = "Rabbit",
+  "Deer (cannot ID)" = "Deer",
+  "White-tailed deer"	= "Deer",
+  "Mule deer"	= "Deer",
+  "White-tailed deer_White-tailed deer" = "Deer",
+  "Black-tailed Deer" = "Deer",
+  "butterfly (cannot ID)" = "Insect",
+  "Dragonfly" = "Insect",
+  "Bumblebee" = "Insect",
+  "Butterfly" = "Insect",
+  "Domestic Horse" = "Horse",
+  "Box turtle" = "Turtle",
+  "Weasel (cannot ID)" = "Weasel",
+  "Long-tailed weasel" = "Weasel",
+  "Short-tailed weasel" = "Weasel",
+  "Mallard duck" = "Duck",
+  "duck" = "Duck",
+  "red squirrel" = "Red squirrel",
+  "American red squirrel" = "Red squirrel"
+)
+
+# Convert to group name
+df$commonName <- ifelse(
+  df$commonName %in% names(species_map),
+  species_map[df$commonName],
+  df$commonName
+)
+
+# Remove all of these commonName entries (don't want multi-species photos)
+to_remove = c("Domestic dog_Human", "Unknown_Empty", "Squirrel (cannot ID)_Empty", NA, "Common Grackle_Fox squirrel",	
+              "Fox squirrel_White-winged dove", "Bird_Squirrel (cannot ID)",	"Domestic cat_Squirrel (cannot ID)",	
+              "Domestic dog_Human",	"Raccoon_Unknown",	"Raccoon_Empty",	"Common Grackle_Empty",	"Domestic cat_Unknown",
+              "Bird_Empty",	"Domestic cat_Mouse",	"Virginia opossum_Empty", "Fox squirrel_Empty", 
+              "Common Grackle_Mourning Dove_Empty",	"Domestic dog_Empty",	"WATER",	"Fox squirrel_Human",	
+              "Fox squirrel_yellow crowned night heron", "Raccoon_Virginia opossum",	"Box turtle_Fox squirrel",	
+              "Domestic dog_Fox squirrel_Human", "White-winged dove_Empty",	"Mourning Dove_Empty",	"Human_Empty",
+              "Unknown_Virginia opossum",	"Snake_Empty", "Deer (cannot ID)_White-tailed deer_White-winged dove",
+              "Bird_Eastern gray squirrel",	"Eastern gray squirrel_Human",	"Bird_Domestic dog",	"Bird_Human",	
+              "Eastern gray squirrel_Human_melanistic gray squirrel",	"Bird_Eastern cottontail rabbit",	
+              "Bird_Eastern chipmunk",	"Eastern gray squirrel_Unknown",	"Domestic dog_Eastern gray squirrel",	
+              "Bird_Fox squirrel",	"Bird_Domestic dog_Fox squirrel_Human",	"Domestic cat_Human",	
+              "Domestic cat_Domestic dog_Human",	"Bird_Domestic cat",	"Bird_Domestic dog_Human",	
+              "Bird_Domestic dog_Squirrel (cannot ID)",	"Human_Unknown",	"Human_Squirrel (cannot ID)",	
+              "Domestic dog_Eastern gray squirrel_Human","Bird_Unknown",	"Eastern cottontail rabbit_Human",	
+              "Coyote_Squirrel (cannot ID)",	"Coyote_White-tailed deer",	"Human_White-tailed deer",	
+              "Domestic dog_Human_Unknown",	"Eastern cottontail rabbit_Eastern gray squirrel",	
+              "Domestic dog_Eastern cottontail rabbit_Human",	"Eastern gray squirrel_White-tailed deer",	
+              "Raccoon_Striped Skunk",	"Bird_Eastern gray squirrel_Human",	"Eastern cottontail rabbit_Virginia opossum",	
+              "Bird_Domestic dog_Eastern gray squirrel_Human",	"Bird_Eastern gray squirrel_Squirrel (cannot ID)",	
+              "Eastern chipmunk_Human",	"Raccoon_White-tailed deer",	"North american beaver_Unknown",	
+              "Striped Skunk_Virginia opossum",	"Fox squirrel_White-tailed deer",	"Eastern cottontail rabbit_Unknown",	
+              "Coyote_Unknown",	"Domestic dog_Unknown",	"Golf cart _Human",	"Eastern cottontail rabbit_Raccoon",	
+              "Bird_Eastern cottontail rabbit_Fox squirrel", "Striped Skunk_Unknown",	"Unknown_White-tailed deer",	
+              "Golf cart ",	"Eastern cottontail rabbit_Red fox",	"Bird_White-tailed deer",	
+              "Deer mouse_Eastern cottontail rabbit",	"American mink_White-tailed deer",	"Red fox_White-tailed deer",	
+              "Eastern cottontail rabbit_White-tailed deer",	"Ring-necked Pheasant_White-tailed deer",	"Bird_Woodchuck",	
+              "Eastern chipmunk_White-tailed deer",	"Domestic cat_Raccoon",	"Domestic cat_Virginia opossum",	
+              "Raccoon_Red fox",	"Vehicle",	"Bird_Raccoon",	"Eastern cottontail rabbit_Raccoon_Unknown",	
+              "Fox squirrel_Unknown",	"Fox squirrel_red squirrel_White-tailed deer",	"red squirrel_White-tailed deer",	
+              "Coyote_Red fox",	"Raccoon_Woodchuck",	"Coyote_Fox squirrel",	"Squirrel (cannot ID)_Unknown",
+              "Fox squirrel_Woodchuck",	"Bird_Fox squirrel_Squirrel (cannot ID)",	"duck_Great-tailed grackle",	
+              "small mammal (cannot ID)",	"Bird_Northern cardinal",	"Bird_Common Grackle",	
+              "Common Grackle_White-winged dove",	"Common Grackle_duck",	"Bird_duck",	"Bird_Mourning Dove",	
+              "Fox squirrel_Squirrel (cannot ID)",	"Eastern gray squirrel_Squirrel (cannot ID)",	
+              "Eastern gray squirrel_melanistic gray squirrel",	"Eastern gray squirrel_Fox squirrel",	
+              "Eastern chipmunk_Eastern gray squirrel",	"Brown Rat_Mouse", "Fox squirrel_red squirrel", 
+              "Domestic dog_Vehicle", "Eastern gray squirrel_Vehicle", "Human_Vehicle", "Bird_Eastern gray squirrel_Unknown",
+              "American robin_Eastern gray squirrel", "Bird_Bird - Blue jay", "Red fox_Unknown", 
+              "Canada Goose_Eastern gray squirrel", "American robin_Human", "Bird_Canada Goose", "Canada Goose_Human",
+              "Domestic cat_Vehicle", "Unknown_Vehicle", "trash", "American robin_Bird", 
+              "Eastern gray squirrel_Human_Vehicle", "Domestic dog_Eastern gray squirrel_Human_Unknown", "Bird_Vehicle",
+              "Bird_Bird_Canada Goose", "Eastern gray squirrel_Red fox", "Human_Red fox", "Bird_Red fox", 
+              "Domestic cat_White-tailed deer", "Eastern gray squirrel_Northern cardinal", 
+              "Bird - Blue jay_Eastern gray squirrel", "American robin_Bird_Eastern gray squirrel", 
+              "Armadillo_White-tailed deer", "American robin_Bird - Blue jay", 
+              "Eastern gray squirrel_small mammal (cannot ID)_Squirrel (cannot ID)", "Armadillo_Unknown", 
+              "Bird_Human_Vehicle", "Canada Goose_Human_Vehicle", "Canada Goose_Vehicle", "Canada Goose_Unknown",
+              "Bird_trash", "trash_Empty", "Bird_Human_Unknown", "Eastern gray squirrel_Woodchuck", 
+              "Vehicle_White-tailed deer", "Raccoon_Vehicle_White-tailed deer", "Squirrel (cannot ID)_White-tailed deer",
+              "Bird_Eastern gray squirrel_Mallard duck", "Bird_Mallard duck", "Eastern gray squirrel_Mallard duck", 
+              "Domestic dog_gray squirrel (cannot ID)_Human", "Domestic dog_Human_Squirrel (cannot ID)", 
+              "Domestic dog_Squirrel (cannot ID)", "Bird_Eastern gray squirrel_Vehicle", 
+              "Eastern cottontail rabbit_Squirrel (cannot ID)", "Squirrel (cannot ID)_Vehicle", 
+              "Domestic dog_Domestic dog_Human", "Eastern gray squirrel_Human_Squirrel (cannot ID)", 
+              "Raccoon_Squirrel (cannot ID)_White-tailed deer", "Eastern gray squirrel_Empty", 
+              "American robin_Common Grackle_Eastern gray squirrel", "Bird_Bird_Human", 
+              "Bird_Domestic dog_Eastern gray squirrel_Human_Squirrel (cannot ID)", "Squirrel (cannot ID)_Unknown_Empty",
+              "Bumblebee_Domestic dog", "Virginia opossum_White-tailed deer", "Bird_Squirrel (cannot ID)_Unknown", 
+              "Eastern gray squirrel_Fox squirrel_White-tailed deer", "Bird_Eastern gray squirrel_White-tailed deer", 
+              "Red fox_Virginia opossum", "Domestic dog_Human_Human", "Domestic dog_Eastern cottontail rabbit", 
+              "Bird_Eastern cottontail rabbit_Squirrel (cannot ID)", "Domestic cat_Eastern gray squirrel", 
+              "Eastern cottontail rabbit_Eastern gray squirrel_Human", "Squirrel (cannot ID)_Wild turkey", 
+              "Mallard duck_White-tailed deer", "Golf cart _Human_Vehicle", "Bird_Golf cart _Human", "Human_Human_Vehicle",
+              "Horse_Human", "Horse_Human_Unknown", "American Crow_Eastern gray squirrel", "American robin_Dark-eyed Junco",
+              "Bird_White-tailed jackrabbit", "American robin_Unknown", "American Crow_American robin", 
+              "American robin_Northern Flicker", "American robin_Bird_Northern Flicker", 
+              "American robin_Dark-eyed Junco_Northern Flicker", "Dark-eyed Junco_Northern Flicker", 
+              "American Crow_Domestic dog", "Black-tailed Deer_Deer (cannot ID)", "American robin_Varied Thrush",
+              "Bird_Varied Thrush", "Rabbit (cannot ID)_Unknown", "Bird_Rabbit (cannot ID)", 
+              "American robin_Eastern chipmunk", "Bird_Western Chipmunks", "Elk_Unknown", "Bird_Black-tailed Deer", 
+              "Douglas squirrel_Human", "Bird_Douglas squirrel", "Deer (cannot ID)_Human", 
+              "Domestic dog_Douglas squirrel_Human", "Black-tailed Deer_Human", "American Crow_Human", 
+              "American robin_European Starling", "Eastern gray squirrel_White-tailed jackrabbit", 
+              "Eastern gray squirrel_Ring-necked Pheasant", "Ring-necked Pheasant_Squirrel (cannot ID)", 
+              "Eastern gray squirrel_Rabbit (cannot ID)", "Eastern cottontail rabbit_Songbird/Perching Bird",
+              "Songbird/Perching Bird_Woodchuck", "Eastern gray squirrel_Songbird/Perching Bird", 
+              "American mink_small mammal (cannot ID)", "Bird_Songbird/Perching Bird", "Coyote_Virginia opossum", 
+              "Eastern cottontail rabbit_small mammal (cannot ID)", "Fox squirrel_Songbird/Perching Bird", 
+              "Eastern chipmunk_Fox squirrel", "Songbird/Perching Bird_Squirrel (cannot ID)", 
+              "Songbird/Perching Bird_Unknown"
+)
+
+df <- df[!df$commonName %in% to_remove, ]
+
+# Ensure only the intended species groups remain
+print(unique(df$commonName))
+
+```
+
+```{r}
+
+# Dataframe for tracking site-seasons for human vs. md for each species
+species_counts <- data.frame(
+  species = character(),
+  source = character(),
+  count = integer(),
+  stringsAsFactors = FALSE
+)
+
+# Track amount of images after MD "removes" them below the threshold
+total_images <- data.frame(
+  threshold = numeric(),
+  count = integer()
+)
+
+# List of different species
+species_list <- unique(df$commonName)
+
+# City names
+cities <- unique(df$City)
+
+# Confidence threshold
+confs <- c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99)
+
+# If these commonName not desired, uncomment
+exclude <- c("Human", "Empty", "Unknown")
+
+```
+
+```{r}
+
+# Iterate through each confidence threshold
+for (thresh in confs) {
+  # Count number of images at current threshold
+  cur_count <- data.frame(
+    threshold = thresh,
+    count = nrow(df %>% filter(maxDetectionConf >= thresh))
+  )
+  # Combine into whole dataframe
+  total_images <- rbind(total_images, cur_count)
+  
+  # For each city
+  for (city in cities) {
+    # Filter down to current city
+    city_active_dates <- active_dates %>%
+      filter(City == city)
+    
+    city_df <- df %>%
+      filter(City == city)
+    
+    # Define path to directory
+    folder_path <- paste0(output_path, city, "/")
+    
+    # Create directory if not already existing
+    if (dir.exists(folder_path) == F) {
+      dir.create(folder_path)
+    }
+    
+    folder_path <- paste0(folder_path, "Conf. Thresh. ", thresh, "/")
+    
+    if (dir.exists(folder_path) == F) {
+      dir.create(folder_path)
+    }
+    
+    # Iterate through each species
+    for (species in species_list) {
+      if (species %in% exclude) {
+        next
+      }
+      # Subsets to only current species
+      df_human <- city_df %>%
+        filter(commonName == species)
+      
+      # New dataframe that excludes images below confidence threshold
+      if (thresh == 0) {
+        df_md <- df_human
+      } else {
+        df_md <- df_human %>%
+          filter(maxDetectionConf >= thresh)
+      }
+    
+      # List of dataframes to iterate through
+      dfs <- list(df_human = df_human, df_md = df_md)
+      
+      # Creates empty list to add dataframes to
+      results_list <- list()
+      
+      # For each dataframe
+      for (df_name in names(dfs)) {
+        # Reset cur_grid (where each section is hosted and then appended to total results)
+        cur_grid <- city_active_dates %>%
+          mutate(commonName = species)
+        
+        # Define df_cur to current dataframe
+        df_cur <- dfs[[df_name]]
+        
+        # Ignore if species wasn't observed
+        if (nrow(df_cur) > 0) {
+          # For each entry in dataframe
+          for (i in 1:nrow(df_cur)) {
+            # Get values of interest
+            season <- df_cur$Season[i]
+            relative_day <- df_cur$relative_day[i]
+            site <- df_cur$locAbbr[i]
+            location <- df_cur$City[i]
+            
+            # Get name of day column
+            day_column_name <- paste0("Day_", relative_day)
+            
+            # Put 1 for an observation
+            cur_grid[cur_grid$Season == season & cur_grid$locAbbr == site & cur_grid$City == location, day_column_name] <- 1
+          }
+        }
+        
+        # Select which cities to observe across thresholds
+        if (species %in% c("Bird", "Black bear", "Bobcat", "Coyote", "Domestic cat", 
+                           "Lizard", "Mule deer", "Rabbit", "Raccoon", "Rodent", "Squirrel/Chipmunk", 
+                           "Striped Skunk", "Virginia opossum")) {
+          # Count number of site-seasons where species was observed
+          site_seasons <- apply(cur_grid[, grep("^Day_", names(cur_grid))], 1, 
+                                function(row) as.integer(any(row == 1, na.rm = TRUE)))
+          
+          # Put count in correct column format
+          if (df_name == "df_human") {
+            species_counts <- rbind(species_counts, 
+                                    data.frame(species = species,
+                                               source = df_name, count = sum(site_seasons)))
+          } else {
+            species_counts <- rbind(species_counts, 
+                                    data.frame(species = species, 
+                                               source = paste0(df_name, " (", thresh, ")"), 
+                                               count = sum(site_seasons)))
+          }
+        }
+        
+        # Add column specifying source
+        updated_grid <- cur_grid %>%
+          mutate(Treatment = df_name)
+        
+        # Change locAbbr name for script, can't have duplicate location names
+        if (df_name == "df_md") {
+          updated_grid$locAbbr <- paste0(updated_grid$locAbbr, "md")
+        }
+        
+        # Add dataframe to list
+        results_list[[df_name]] <- updated_grid
+      }
+    
+      # Bind list (puts MD data below Human data) and add it to city dataframe
+      complete_grid <- bind_rows(results_list)
+      
+      # Order and name columns
+      complete_grid <- complete_grid %>%
+        rename("Species" = "commonName", "SeasonNumber" = "Season", "Site" = "locAbbr") %>%
+        select(Species, SeasonNumber, City, Site, Latitude, Longitude, starts_with("Day_"), Treatment)
+      
+      # Change species name for file naming
+      species_name <- gsub("/", "-", species)
+      
+      # Filepath specification
+      output_filename <- paste0(folder_path, "OccupancyReport - ", species_name, " - Seasonal.csv")
+      
+      # Output file for each species
+      write.csv(complete_grid, output_filename, row.names = FALSE)
+    }
+  }
+}
+
+```
+
+```{r}
+
+# Plot total number of images at each threshold
+ggplot(total_images, aes(x = factor(threshold), y = count, group=1)) + 
+  geom_line(color = "steelblue", size = 1) + 
+  geom_point(color = "steelblue", size = 3) +
+  labs(x = "Threshold", y = "Total Images", title = "Images per Threshold") + 
+  theme_minimal()
+
+ggsave("../Output/images_per_threshold.jpg", height=5, width=5, units="in", dpi=600)
+
+# TODO: Iterate through below plot for each city?
+
+# Remove duplicates
+species_counts <- distinct(species_counts) %>%
+  filter(source != "df_md (0)")
+
+# Order by highest to least count of species site-season observations
+species_order <- species_counts %>%
+  filter(source == "df_human") %>%
+  arrange(desc(count)) %>%
+  pull(species)
+
+# Apply order to species_counts, reverse for plotting
+species_counts <- species_counts %>%
+  mutate(species = factor(species, levels = rev(species_order)))
+
+# Specify order for key
+desired_order <- c("df_human", paste0("df_md (", sprintf("%.1f", seq(0.1, 0.9, 0.1)), ")"), "df_md (0.99)")
+
+species_counts <- species_counts %>%
+  mutate(source = factor(source, levels = rev(desired_order)))  # rev() makes df_human appear at the top
+
+# Plot site-seasons against species and their human vs. md data
+count_plot <- ggplot(
+  species_counts, aes(x = count, y = species, fill = source)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.7)) +
+  labs(
+    title = "Number of Site-Seasons with Detections by Source",
+    x = "Number of Site-Seasons",
+    y = "Species",
+    fill = "Source"
+  ) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.background = element_rect(fill = "white", color = "black"),
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_line(color = "gray80"),
+    panel.grid.minor = element_line(color = "gray90"),
+    axis.title = element_text(color = "black", size = 20),
+    axis.text = element_text(color = "black", size = 12),
+    legend.position = "top",
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    plot.title = element_text(hjust = 0.5, size = 24),
+    plot.margin = margin(t = 10, r = 20, b = 10, l = 10)
+  )
+
+# Path to folder
+filepath = "../"
+
+# Save plot
+ggsave(filename = paste0(filepath, "Output/detection_by_treatment.png"), 
+       plot = count_plot, 
+       width = 16, 
+       height = 16,
+       dpi = 300
+)
+
+```
+
+```{r}
+
+# Exclude due to modeling errors / not desired
+exclude <- c("Human", "Empty", "Unknown"
+  #"Mountain lion", "Snake", "Western Toad", "Domestic Horse", "Empty",
+  #"Human", "Unknown", "Gray fox", "Domestic dog"
+  )
+
+# NOTES: 
+# Species with no observations at the city will not be modeled
+# These specified species have some data but not enough, causing errors in modeling
+PACA_skip <- c("Snake", "Western Toad", "Horse", "Fox squirrel")
+AUTX_skip <- c("Insect", "Snake", "Duck", "Turtle", "Gray fox")
+BOMA_skip <- c()
+CHIL_skip <- c("Gray fox", "Snake", "Duck", "Red fox", "Flying squirrel", "North american beaver", 
+               "Weasel", "Woodchuck", "American mink", "Rodent")
+ICIA_skip <- c("Bobcat", "Insect", "Flying squirrel", "muskrat", "American mink", 
+               "American Badger")
+ININ_skip <- c("Skunk", "Rodent", "Eastern gray squirrel", "Turtle", "Chipmunk", 
+               "North american beaver", "muskrat", "American Badger", "Red fox", 
+               "American mink", "Red squirrel")
+JAMS_skip <- c("Skunk", "Rodent", "Snake", "Squirrel-Chipmunk", "Fox squirrel")
+SLMO_skip <- c("Rodent", "Gray fox", "Insect", "Horse", "Duck", "Canada Goose", 
+               "Chipmunk")
+TAWA_skip <- c("Bobcat", "Squirrel-Chipmunk", "Fox squirrel", "Weasel", "Western gray squirrel", "Mountain Beaver", 
+               "Chipmunk")
+URIL_skip <- c("Weasel")
+
+filepath = "../"
+
+# For each confidence threshold
+for (threshold in confs[1:1]) {
+  # For each city
+  for (location in cities) {
+    # For considering by day and by week
+    for (data_by in c("Day", "Week")) {
+      if (data_by == "Day") {
+        next
+      }
+      # For considering all dates or just middle dates
+      for (data_range in c("All", "Middle")) {
+        if (data_range == "Middle") {
+          next
+        }
+        # For each species...
+        for (name in species_list) {
+          # Skip if part of exclude list
+          if (name %in% exclude ||
+              (location == "PACA" && name %in% PACA_skip) ||
+              (location == "AUTX" && name %in% AUTX_skip) ||
+              (location == "BOMA" && name %in% BOMA_skip) ||
+              (location == "CHIL" && name %in% CHIL_skip) ||
+              (location == "ICIA" && name %in% ICIA_skip) ||
+              (location == "ININ" && name %in% ININ_skip) ||
+              (location == "JAMS" && name %in% JAMS_skip) ||
+              (location == "SLMO" && name %in% SLMO_skip) ||
+              (location == "TAWA" && name %in% TAWA_skip) ||
+              (location == "URIL" && name %in% URIL_skip)) {
+            next
+          }
+          # Print current process
+          print(paste(name, data_range, data_by, location, threshold))
+          
+          # Get desired data for city, threshold, species
+          species_data <- read.csv(paste0(filepath, "Species Occupancy/", location, 
+                                          "/Conf. Thresh. ", threshold, 
+                                          "/OccupancyReport - ", name, " - Seasonal.csv"))
+          # Get day columns from data
+          day_cols <- grep("^Day_", names(species_data), value = TRUE)
+          # If no observations made for species, skip
+          if (!any(species_data[, day_cols] == 1, na.rm = TRUE)) {
+            message(paste("Skipping", name, "- no detections in any day column"))
+            next
+          }
+          
+          # Run "Occupancy Modeling.Rmd" with current species and specification
+          render(paste0(filepath, "R Files/Occupancy Modeling.Rmd"), 
+                 params = list(path = filepath, sp_name = name, range = data_range, 
+                               by = data_by, city = location, conf = threshold))
+        }
+      }
+    }
+  }
+}
+
+
+```
+
